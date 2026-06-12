@@ -10,6 +10,7 @@
 
 - 上傳或貼上英文小說章節
 - 掃描人物、地名、組織、物件、能力與稱謂
+- 使用 spaCy 找出英文實體，再由 Llama 分類並產生繁中譯名
 - 以網頁表格審核術語候選
 - 依 `glossary.md` 分段翻譯
 - 審查漏譯、誤譯、譯名違規、代詞錯置與翻譯腔
@@ -31,6 +32,7 @@ CPU 可以執行，但速度依處理器、量化版本和文本長度而異。
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -m spacy download en_core_web_sm
 ```
 
 ## 安裝模型

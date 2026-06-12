@@ -32,6 +32,21 @@ def test_scan_translate_and_review_flow():
     assert len(client.calls) == 3
 
 
+def test_scan_prompt_contains_hybrid_ner_candidates():
+    client = StubClient(["[]"])
+    flow = TranslationPipeline(client)
+    flow.scan(
+        "Dorothy lived in Kansas with Uncle Henry and Aunt Em.",
+        DEFAULT_GLOSSARY,
+        "Chapter 1",
+    )
+    prompt = client.calls[0][2]
+    assert "Dorothy" in prompt
+    assert "Kansas" in prompt
+    assert "Uncle Henry" in prompt
+    assert "Aunt Em" in prompt
+
+
 def test_long_text_is_split_without_loss():
     source = "First paragraph.\n\nSecond paragraph."
     chunks = split_text(source, 18)

@@ -3,14 +3,15 @@ import json
 import re
 
 from .glossary import Term, parse_glossary, parse_proposals
+from .ner import extract_candidates
 
 
-SCAN_SYSTEM = """你是英語小說的專有名詞編輯。從原文抽取需要跨章保持一致的實體。
+SCAN_SYSTEM = """你是英語小說的專有名詞編輯。程式已從原文抽出候選實體。
 
 只允許以下類型：人物、地名、組織、物件、能力、稱謂、其他專名。
 具名動物視為人物角色，不可分類為物件。
-不要提出完整句子、普通名詞、動詞、形容詞、章節標題或「英文原文」等欄位名稱。
-不要重複既有術語。人物姓名與固定稱呼必須分開列出。
+刪除誤抓的句首單字、普通名詞與章節標題。
+不得新增候選清單以外的 source，也不要重複既有術語。
 
 只回傳 JSON 陣列，不要 Markdown 或解釋。每筆必須包含：
 source、target、type、first_chapter、remarks。
@@ -65,12 +66,25 @@ class TranslationPipeline:
     def scan(self, source: str, glossary: str, chapter: str) -> list[Term]:
         if not source.strip():
             raise ValueError("請先提供英文原文")
+        existing = parse_glossary(glossary)
+        known_keys = {term.source.casefold() for term in existing}
+        candidates = [
+            item
+            for item in extract_candidates(source)
+            if item.text.casefold() not in known_keys
+        ]
+        if not candidates:
+            return []
         known = "\n".join(
-            f"- {term.source} -> {term.target}" for term in parse_glossary(glossary)
+            f"- {term.source} -> {term.target}" for term in existing
         ) or "（無）"
+        candidate_text = "\n".join(
+            f"- {item.text} | 建議類型：{item.suggested_type} | 來源：{item.source}"
+            for item in candidates
+        )
         prompt = (
-            f"章節：{chapter or '未指定'}\n既有術語：\n{known}\n\n"
-            f"英文原文：\n{source}"
+            f"章節：{chapter or '未指定'}\n\n候選實體：\n{candidate_text}\n\n"
+            f"既有術語：\n{known}\n\n語境原文：\n{source}"
         )
         raw = self.client.generate(
             self.model, SCAN_SYSTEM, prompt, format_schema=TERM_SCHEMA
