@@ -22,9 +22,17 @@ HEADERS = ["原文", "繁中譯名", "類型", "首次章節", "備註"]
 PREFERRED_MODEL = "hf.co/chienweichang/Llama-3-Taiwan-8B-Instruct-GGUF:Q4_K_M"
 
 
-def pipeline(model: str, url: str, chunk_chars: float) -> TranslationPipeline:
+def pipeline(
+    model: str,
+    url: str,
+    chunk_chars: float,
+    ner_engine: str = "gliner",
+) -> TranslationPipeline:
     return TranslationPipeline(
-        OllamaClient(url), model.strip() or PREFERRED_MODEL, int(chunk_chars)
+        OllamaClient(url),
+        model.strip() or PREFERRED_MODEL,
+        int(chunk_chars),
+        ner_engine,
     )
 
 
@@ -50,10 +58,10 @@ def download_test_text(url: str):
         return None, f"下載失敗：{exc}"
 
 
-def scan_terms(source, glossary, chapter, model, url, chunk_chars):
+def scan_terms(source, glossary, chapter, model, url, chunk_chars, ner_engine):
     started = time.perf_counter()
     try:
-        flow = pipeline(model, url, chunk_chars)
+        flow = pipeline(model, url, chunk_chars, ner_engine)
         terms = flow.scan(source, glossary, chapter)
         rows = [
             [t.source, t.target, t.type, t.first_chapter, t.remarks] for t in terms
@@ -61,10 +69,17 @@ def scan_terms(source, glossary, chapter, model, url, chunk_chars):
         timing = operation_timing(flow, started)
         ner_names = "、".join(flow.last_ner_candidates or []) or "無"
         returned_names = "、".join(term.source for term in terms) or "無"
+        engine_name = "GLiNER" if ner_engine == "gliner" else "spaCy"
         return rows, (
-            f"spaCy／規則候選：{ner_names}  \n"
+            f"{engine_name}／規則候選：{ner_names}  \n"
             f"最終術語：{returned_names}  \n"
-            f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。  \n{timing}"
+            f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。"
+            + (
+                " GLiNER 採高召回設定，可能包含一般名詞、代詞或類型誤判。"
+                if ner_engine == "gliner"
+                else ""
+            )
+            + f"  \n{timing}"
         )
     except Exception as exc:
         return [], f"掃描失敗：{exc}"
@@ -165,6 +180,15 @@ def build_app() -> gr.Blocks:
             chunk_chars = gr.Slider(
                 1000, 6000, value=3000, step=250, label="每段最大字元數"
             )
+            ner_engine = gr.Radio(
+                choices=[
+                    ("GLiNER（預設，較不易漏抓）", "gliner"),
+                    ("spaCy（較快，候選較保守）", "spacy"),
+                ],
+                value="gliner",
+                label="術語辨識引擎",
+                info="GLiNER 可能多抓一般名詞；所有候選仍需人工批准。",
+            )
         source_file = gr.File(
             label="上傳 UTF-8 英文 .txt 或 .md", type="filepath"
         )
@@ -203,7 +227,7 @@ def build_app() -> gr.Blocks:
 
         scan_button.click(
             scan_terms,
-            [source, glossary, chapter, model, url, chunk_chars],
+            [source, glossary, chapter, model, url, chunk_chars, ner_engine],
             [candidates, scan_status],
         )
         approve_button.click(

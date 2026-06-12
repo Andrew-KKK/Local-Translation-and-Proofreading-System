@@ -77,7 +77,7 @@ def parse_classified_terms(raw: str, candidates: list, chapter: str) -> list[Ter
             )
         return terms
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise ValueError("模型沒有完整回傳所有 spaCy 候選") from exc
+        raise ValueError("模型沒有完整回傳所有 NER 候選") from exc
 
 
 @dataclass
@@ -85,6 +85,7 @@ class TranslationPipeline:
     client: object
     model: str = "llama-3-taiwan-8b"
     chunk_chars: int = 3000
+    ner_engine: str = "gliner"
     last_ner_candidates: list[str] | None = None
 
     def scan(self, source: str, glossary: str, chapter: str) -> list[Term]:
@@ -94,7 +95,7 @@ class TranslationPipeline:
         known_keys = {term.source.casefold() for term in existing}
         candidates = [
             item
-            for item in extract_candidates(source)
+            for item in extract_candidates(source, self.ner_engine)
             if item.text.casefold() not in known_keys
         ]
         self.last_ner_candidates = [item.text for item in candidates]

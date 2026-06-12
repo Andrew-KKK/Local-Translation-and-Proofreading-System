@@ -31,7 +31,7 @@ def test_scan_translate_and_review_flow():
     )
     translated = json.dumps({"translation": "艾莉絲抵達了。"}, ensure_ascii=False)
     client = StubClient([proposal, translated, translated])
-    flow = TranslationPipeline(client)
+    flow = TranslationPipeline(client, ner_engine="spacy")
     assert flow.scan("Iris arrived.", DEFAULT_GLOSSARY, "Chapter 1")
     draft = flow.translate("Iris arrived.", DEFAULT_GLOSSARY)
     assert flow.review("Iris arrived.", draft, DEFAULT_GLOSSARY) == draft
@@ -44,7 +44,7 @@ def test_scan_prompt_contains_hybrid_ner_candidates():
         for index in range(4)
     }
     client = StubClient([json.dumps(proposal, ensure_ascii=False)])
-    flow = TranslationPipeline(client)
+    flow = TranslationPipeline(client, ner_engine="spacy")
     flow.scan(
         "Dorothy lived in Kansas with Uncle Henry and Aunt Em.",
         DEFAULT_GLOSSARY,
@@ -65,7 +65,8 @@ def test_scan_preserves_every_spacy_candidate():
         "entity_3": {"target": "艾姆阿姨", "type": "稱謂", "remarks": ""},
     }
     flow = TranslationPipeline(
-        StubClient([json.dumps(proposal, ensure_ascii=False)])
+        StubClient([json.dumps(proposal, ensure_ascii=False)]),
+        ner_engine="spacy",
     )
     terms = flow.scan(
         "Dorothy lived in Kansas with Uncle Henry and Aunt Em.",
@@ -91,7 +92,8 @@ def test_scan_repairs_targets_that_are_still_english():
                 json.dumps(classified, ensure_ascii=False),
                 json.dumps(repaired, ensure_ascii=False),
             ]
-        )
+        ),
+        ner_engine="spacy",
     )
     terms = flow.scan("Dorothy arrived.", DEFAULT_GLOSSARY, "Chapter 1")
     assert terms[0].target == "桃樂絲"

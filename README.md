@@ -10,7 +10,8 @@
 
 - 上傳或貼上英文小說章節
 - 掃描人物、地名、組織、物件、能力與稱謂
-- 使用 spaCy 找出英文實體，再由 Llama 分類並產生繁中譯名
+- 預設使用 GLiNER 找出英文實體，也可切換為較快、較保守的 spaCy
+- 由 Llama 產生繁中譯名，再由使用者人工刪除或修改候選
 - 以網頁表格審核術語候選
 - 依 `glossary.md` 分段翻譯
 - 審查漏譯、誤譯、譯名違規、代詞錯置與翻譯腔
@@ -31,9 +32,15 @@ CPU 可以執行，但速度依處理器、量化版本和文本長度而異。
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```
+
+GLiNER 是預設 NER 引擎，第一次掃描時會從 Hugging Face 下載
+`urchade/gliner_small-v2.1`。spaCy 英文模型只在切換到 spaCy 引擎時使用。
+GLiNER 偏向提高召回率，因此可能多抓一般名詞、代詞或給出錯誤類型；候選
+不會自動寫入術語表，仍須在網頁表格中人工確認。
 
 ## 安裝模型
 
@@ -71,12 +78,13 @@ python app.py
 
 1. 貼上英文原文，或上傳 UTF-8 `.txt`／`.md`。
 2. 視需要載入上一章匯出的 `glossary.md`。
-3. 按「掃描術語候選」。
-4. 在候選表格中修正內容，並刪除不採用的列。
-5. 按「批准表格中的術語」，更新畫面中的 `glossary.md`。
-6. 按「產生翻譯初稿」。
-7. 檢閱初稿後，按「執行品質審查」。
-8. 人工確認審查稿，再匯出譯文與術語表。
+3. 在模型設定中選擇 NER 引擎；預設為 GLiNER。
+4. 按「掃描術語候選」。
+5. 在候選表格中修正內容，並刪除不採用的列。
+6. 按「批准表格中的術語」，更新畫面中的 `glossary.md`。
+7. 按「產生翻譯初稿」。
+8. 檢閱初稿後，按「執行品質審查」。
+9. 人工確認審查稿，再匯出譯文與術語表。
 
 `examples/` 內有可立即使用的英文短篇與範例術語表。
 
