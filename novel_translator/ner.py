@@ -74,9 +74,7 @@ def _extract_spacy_candidates(text: str) -> dict[str, EntityCandidate]:
 def _extract_gliner_candidates(text: str) -> dict[str, EntityCandidate]:
     candidates: dict[str, EntityCandidate] = {}
     model = _load_gliner_model()
-    for chunk in _split_text_chunks(
-        text, DEFAULT_GLINER_CHUNK_SIZE, DEFAULT_GLINER_CHUNK_OVERLAP
-    ):
+    for chunk in _gliner_segments(text):
         predictions = model.predict_entities(
             chunk, list(GLINER_LABELS), threshold=0.5
         )
@@ -97,6 +95,22 @@ def _extract_gliner_candidates(text: str) -> dict[str, EntityCandidate]:
                     ),
                 )
     return candidates
+
+
+def _gliner_segments(text: str) -> list[str]:
+    segments = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        segments.extend(
+            _split_text_chunks(
+                paragraph,
+                DEFAULT_GLINER_CHUNK_SIZE,
+                DEFAULT_GLINER_CHUNK_OVERLAP,
+            )
+        )
+    return segments
 
 
 def _apply_title_rules(

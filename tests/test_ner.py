@@ -49,3 +49,23 @@ def test_gliner_is_default_and_merges_overlapping_chunk_results(monkeypatch):
         )
     }
     assert values == {"Dorothy", "Toto"}
+
+
+def test_gliner_keeps_heading_and_body_in_separate_segments(monkeypatch):
+    seen = []
+
+    class FakeModel:
+        def predict_entities(self, text, labels, threshold):
+            seen.append(text)
+            if "Dorothy" in text:
+                return [{"text": "Dorothy", "label": "person"}]
+            return []
+
+    monkeypatch.setattr(ner, "_load_gliner_model", lambda: FakeModel())
+    text = "Chapter I\nThe Cyclone\n\nDorothy lived in Kansas."
+    values = {item.text for item in extract_candidates(text)}
+    assert "Dorothy" in values
+    assert all(
+        not ("The Cyclone" in segment and "Dorothy" in segment)
+        for segment in seen
+    )

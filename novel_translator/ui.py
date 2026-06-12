@@ -15,7 +15,11 @@ from .glossary import (
 )
 from .gutenberg import download_text, strip_gutenberg_boilerplate, suggested_filename
 from .ollama_client import OllamaClient
-from .pipeline import TranslationPipeline, glossary_violations
+from .pipeline import (
+    TermBatchError,
+    TranslationPipeline,
+    residual_glossary_sources,
+)
 
 
 HEADERS = ["原文", "繁中譯名", "類型", "首次章節", "備註"]
@@ -70,10 +74,17 @@ def scan_terms(source, glossary, chapter, model, url, chunk_chars, ner_engine):
         ner_names = "、".join(flow.last_ner_candidates or []) or "無"
         returned_names = "、".join(term.source for term in terms) or "無"
         engine_name = "GLiNER" if ner_engine == "gliner" else "spaCy"
+        batch_text = (
+            f"術語提案分成 {flow.last_scan_batch_count} 批處理。  \n"
+            if flow.last_scan_batch_count
+            else ""
+        )
         return rows, (
             f"{engine_name}／規則候選：{ner_names}  \n"
             f"最終術語：{returned_names}  \n"
-            f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。"
+            f"{batch_text}"
+            f"找到 {len(rows)} 筆候選。請直接修改或刪除不採用的列；"
+            "產生翻譯時會自動採用目前表格。"
             + (
                 " GLiNER 採高召回設定，可能包含一般名詞、代詞或類型誤判。"
                 if ner_engine == "gliner"
@@ -81,22 +92,35 @@ def scan_terms(source, glossary, chapter, model, url, chunk_chars, ner_engine):
             )
             + f"  \n{timing}"
         )
+    except TermBatchError as exc:
+        rows = [
+            [t.source, t.target, t.type, t.first_chapter, t.remarks]
+            for t in exc.partial_terms
+        ]
+        return rows, f"掃描未完成：{exc}"
     except Exception as exc:
         return [], f"掃描失敗：{exc}"
 
 
-def approve_terms(rows, glossary):
-    try:
-        keys = ["source", "target", "type", "first_chapter", "remarks"]
-        approved = [
+def glossary_with_rows(rows, glossary):
+    keys = ["source", "target", "type", "first_chapter", "remarks"]
+    terms = []
+    for row in rows if rows is not None else []:
+        if not any(str(cell or "").strip() for cell in row):
+            continue
+        terms.append(
             Term.from_dict(dict(zip(keys, (str(cell or "") for cell in row))))
-            for row in rows
-        ]
-        merged = merge_terms(parse_glossary(glossary), approved)
-        updated = render_glossary(merged, persona_section(glossary))
-        return updated, f"已批准 {len(approved)} 筆術語。"
+        )
+    merged = merge_terms(parse_glossary(glossary), terms)
+    return render_glossary(merged, persona_section(glossary))
+
+
+def prepare_translation_glossary(rows, glossary):
+    try:
+        updated = glossary_with_rows(rows, glossary)
+        return updated, "已套用候選表格，正在產生翻譯初稿。"
     except Exception as exc:
-        return glossary, f"批准失敗：{exc}"
+        raise gr.Error(f"術語表更新失敗：{exc}") from exc
 
 
 def translate(source, glossary, model, url, chunk_chars):
@@ -104,10 +128,12 @@ def translate(source, glossary, model, url, chunk_chars):
     try:
         flow = pipeline(model, url, chunk_chars)
         result = flow.translate(source, glossary)
-        result, violations = flow.enforce_glossary(source, result, glossary)
+        result, violations = flow.enforce_glossary(
+            source, result, glossary
+        )
         message = "翻譯初稿完成，並已自動檢查指定譯名。"
         if violations:
-            message += " 自動修正後仍有違規：" + "、".join(violations)
+            message += " 仍需人工檢查的譯名：" + "、".join(violations)
         message += f"  \n{operation_timing(flow, started)}"
         return result, message
     except Exception as exc:
@@ -123,6 +149,9 @@ def review(source, draft, glossary, model, url, chunk_chars):
         message = "品質審查完成，並已自動修正偵測到的譯名違規。"
         if violations:
             message += " 仍有譯名違規：" + "、".join(violations)
+        residual = residual_glossary_sources(source, result, glossary)
+        if residual:
+            message += " 仍有英文專名殘留：" + "、".join(residual)
         message += f"  \n{operation_timing(flow, started)}"
         return result, message
     except Exception as exc:
@@ -144,8 +173,13 @@ def export_files(translation: str, glossary: str):
 def operation_timing(flow: TranslationPipeline, started: float) -> str:
     wall_time = time.perf_counter() - started
     model_time = flow.client.metrics_summary()
+    stages = "；".join(
+        f"{name} {seconds:.1f} 秒"
+        for name, seconds in (flow.stage_timings or [])
+    )
+    detail = "；".join(value for value in (stages, model_time) if value)
     return f"總等待時間 {wall_time:.1f} 秒" + (
-        f"；{model_time}" if model_time else ""
+        f"；{detail}" if detail else ""
     )
 
 
@@ -159,7 +193,8 @@ def build_app() -> gr.Blocks:
     with gr.Blocks(title="本地端小說翻譯協作系統") as app:
         gr.Markdown(
             "# 本地端小說翻譯協作系統\n"
-            "英翻繁中原型。術語必須由使用者批准後才會加入 Markdown。"
+            "英翻繁中原型。掃描後可直接修改候選表格；產生翻譯時會自動"
+            "將表格內容加入 Markdown 術語表。"
         )
         status = gr.Markdown("準備就緒。")
         with gr.Accordion("下載 Project Gutenberg 測試文本", open=False):
@@ -187,7 +222,7 @@ def build_app() -> gr.Blocks:
                 ],
                 value="gliner",
                 label="術語辨識引擎",
-                info="GLiNER 可能多抓一般名詞；所有候選仍需人工批准。",
+                info="GLiNER 可能多抓一般名詞；候選可在翻譯前人工編輯。",
             )
         source_file = gr.File(
             label="上傳 UTF-8 英文 .txt 或 .md", type="filepath"
@@ -201,7 +236,7 @@ def build_app() -> gr.Blocks:
             [test_text_download, status],
         )
 
-        gr.Markdown("## 1. 掃描與批准術語")
+        gr.Markdown("## 1. 掃描與編輯術語")
         glossary_file = gr.File(
             label="載入既有 glossary.md", file_types=[".md"], type="filepath"
         )
@@ -212,7 +247,6 @@ def build_app() -> gr.Blocks:
         candidates = gr.Dataframe(
             headers=HEADERS, datatype=["str"] * 5, type="array", label="術語候選"
         )
-        approve_button = gr.Button("批准表格中的術語")
 
         gr.Markdown("## 2. 翻譯與品質審查")
         translate_button = gr.Button("產生翻譯初稿", variant="primary")
@@ -230,10 +264,11 @@ def build_app() -> gr.Blocks:
             [source, glossary, chapter, model, url, chunk_chars, ner_engine],
             [candidates, scan_status],
         )
-        approve_button.click(
-            approve_terms, [candidates, glossary], [glossary, status]
-        )
         translate_button.click(
+            prepare_translation_glossary,
+            [candidates, glossary],
+            [glossary, status],
+        ).then(
             translate,
             [source, glossary, model, url, chunk_chars],
             [draft, status],

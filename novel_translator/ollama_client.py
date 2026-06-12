@@ -34,8 +34,13 @@ class OllamaClient:
         system: str,
         prompt: str,
         format_schema: dict | None = None,
+        options: dict | None = None,
+        timeout: int | None = None,
     ) -> str:
         try:
+            request_options = {"temperature": 0.0}
+            if options:
+                request_options.update(options)
             payload = {
                 "model": model,
                 "stream": False,
@@ -43,14 +48,14 @@ class OllamaClient:
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
                 ],
-                "options": {"temperature": 0.0},
+                "options": request_options,
             }
             if format_schema:
                 payload["format"] = format_schema
             response = self._session().post(
                 f"{self.base_url.rstrip('/')}/api/chat",
                 json=payload,
-                timeout=self.timeout,
+                timeout=timeout or self.timeout,
             )
             response.raise_for_status()
             data = response.json()
@@ -71,7 +76,10 @@ class OllamaClient:
         except requests.ConnectionError as exc:
             raise OllamaError("無法連接 Ollama，請先啟動 Ollama 服務。") from exc
         except requests.Timeout as exc:
-            raise OllamaError("Ollama 回應逾時，請縮短文本後重試。") from exc
+            seconds = timeout or self.timeout
+            raise OllamaError(
+                f"Ollama 回應超過 {seconds} 秒，已停止本次請求。"
+            ) from exc
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
             raise OllamaError(f"Ollama 請求失敗：{detail}") from exc
