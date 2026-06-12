@@ -108,6 +108,38 @@ python -m pytest
 完成模型安裝後，請依「確認模型可用」命令及 `examples/` 再執行一次真實模型
 smoke test。
 
+## NER 實驗
+
+準備一份 UTF-8 英文文本，以及人工標註 JSON：
+
+```json
+[
+  {"text": "Dorothy", "type": "人物"},
+  {"text": "Kansas", "type": "地名"}
+]
+```
+
+可用 `examples/ner-gold-template.json` 作為起點。執行 spaCy 比較：
+
+```powershell
+python benchmark_ner.py test-data/wizard-of-oz.txt `
+  test-data/wizard-of-oz-gold.json `
+  --methods spacy spacy-propn `
+  -o test-data/ner-report.json
+```
+
+安裝 GLiNER 後可加入第三種方法：
+
+```powershell
+python -m pip install gliner
+python benchmark_ner.py test-data/wizard-of-oz.txt `
+  test-data/wizard-of-oz-gold.json `
+  --methods spacy spacy-propn gliner
+```
+
+主指標只比較實體名稱是否被抓到；類型判斷錯誤會另外列出。完整 JSON 報告包含
+每種方法的候選、漏抓、誤抓、類型錯誤與執行時間。
+
 ## 限制與倫理
 
 - 第一版只支援英文小說翻譯成臺灣繁體中文。
