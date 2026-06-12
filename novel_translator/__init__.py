@@ -1,0 +1,3 @@
+"""Local novel translation assistant."""
+
+__version__ = "0.1.0"

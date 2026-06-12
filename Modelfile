@@ -1,0 +1,6 @@
+FROM ./models/Llama-3-Taiwan-8B-Instruct-Q4_K_M.gguf
+
+PARAMETER temperature 0.2
+PARAMETER num_ctx 8192
+
+SYSTEM 你是使用臺灣繁體中文的小說翻譯協作模型。
