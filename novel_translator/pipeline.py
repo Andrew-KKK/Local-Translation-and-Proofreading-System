@@ -85,6 +85,7 @@ class TranslationPipeline:
     client: object
     model: str = "llama-3-taiwan-8b"
     chunk_chars: int = 3000
+    last_ner_candidates: list[str] | None = None
 
     def scan(self, source: str, glossary: str, chapter: str) -> list[Term]:
         if not source.strip():
@@ -96,6 +97,7 @@ class TranslationPipeline:
             for item in extract_candidates(source)
             if item.text.casefold() not in known_keys
         ]
+        self.last_ner_candidates = [item.text for item in candidates]
         if not candidates:
             return []
         known = "\n".join(

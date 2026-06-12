@@ -59,7 +59,11 @@ def scan_terms(source, glossary, chapter, model, url, chunk_chars):
             [t.source, t.target, t.type, t.first_chapter, t.remarks] for t in terms
         ]
         timing = operation_timing(flow, started)
+        ner_names = "、".join(flow.last_ner_candidates or []) or "無"
+        returned_names = "、".join(term.source for term in terms) or "無"
         return rows, (
+            f"spaCy／規則候選：{ner_names}  \n"
+            f"最終術語：{returned_names}  \n"
             f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。  \n{timing}"
         )
     except Exception as exc:

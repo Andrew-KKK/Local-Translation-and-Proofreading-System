@@ -43,11 +43,17 @@ def extract_candidates(text: str) -> list[EntityCandidate]:
                 SPACY_LABELS[entity.label_],
                 f"spacy:{entity.label_}",
             )
+    title_candidates = []
     for match in TITLE_PATTERN.finditer(text):
         value = _clean(match.group())
-        candidates[value.casefold()] = EntityCandidate(
-            value, "稱謂", "title-rule"
-        )
+        title_candidates.append(value)
+    for title in title_candidates:
+        title_words = {word.casefold() for word in title.split()}
+        for key, candidate in list(candidates.items()):
+            candidate_words = {word.casefold() for word in candidate.text.split()}
+            if candidate_words < title_words:
+                del candidates[key]
+        candidates[title.casefold()] = EntityCandidate(title, "稱謂", "title-rule")
     return list(candidates.values())
 
 
