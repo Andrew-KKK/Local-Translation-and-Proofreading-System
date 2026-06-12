@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import json
 import re
 
-from .glossary import Term, parse_glossary, parse_proposals
+from .glossary import Term, parse_glossary
 from .ner import extract_candidates
 
 
@@ -10,16 +10,10 @@ SCAN_SYSTEM = """你是英語小說的專有名詞編輯。程式已從原文抽
 
 只允許以下類型：人物、地名、組織、物件、能力、稱謂、其他專名。
 具名動物視為人物角色，不可分類為物件。
-刪除誤抓的句首單字、普通名詞與章節標題。
-不得新增候選清單以外的 source，也不要重複既有術語。
-
-只回傳 JSON 陣列，不要 Markdown 或解釋。每筆必須包含：
-source、target、type、first_chapter、remarks。
-source 保留原文；target 使用自然的臺灣繁體中文。
-
-正確範例：
-[{"source":"Dorothy","target":"桃樂絲","type":"人物",
-"first_chapter":"Chapter 1","remarks":"故事主角"}]"""
+每個 entity_N 都必須輸出，不能省略、合併或新增候選。
+target 必須是含中文字的臺灣繁體中文譯名，不可照抄英文。
+只需填入譯名、類型與簡短備註。
+例如 Dorothy 的 target 應為「桃樂絲」，Kansas 應為「堪薩斯州」。"""
 
 TRANSLATE_SYSTEM = """你是英翻繁中的小說譯者。忠實保留資訊、敘事視角、段落與對話。
 使用自然的臺灣繁體中文。術語表中的譯名、稱呼與人物語氣是硬性規則。
@@ -33,28 +27,57 @@ TERM_FIX_SYSTEM = """你是繁體中文小說的術語修訂員。
 只修正指定的譯名違規，並視需要調整附近語序使中文自然。
 不得改變情節、刪減資訊、加入解釋，或改動未列出的專有名詞。"""
 
-TERM_SCHEMA = {
-    "type": "array",
-    "items": {
-        "type": "object",
-        "properties": {
-            "source": {"type": "string"},
-            "target": {"type": "string"},
-            "type": {
-                "type": "string",
-                "enum": ["人物", "地名", "組織", "物件", "能力", "稱謂", "其他專名"],
-            },
-            "first_chapter": {"type": "string"},
-            "remarks": {"type": "string"},
-        },
-        "required": ["source", "target", "type", "first_chapter", "remarks"],
-    },
-}
+TERM_TYPES = ["人物", "地名", "組織", "物件", "能力", "稱謂", "其他專名"]
 TEXT_SCHEMA = {
     "type": "object",
     "properties": {"translation": {"type": "string"}},
     "required": ["translation"],
 }
+
+
+def build_term_schema(count: int) -> dict:
+    properties = {}
+    required = []
+    for index in range(count):
+        key = f"entity_{index}"
+        required.append(key)
+        properties[key] = {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "type": {"type": "string", "enum": TERM_TYPES},
+                "remarks": {"type": "string"},
+            },
+            "required": ["target", "type", "remarks"],
+        }
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def parse_classified_terms(raw: str, candidates: list, chapter: str) -> list[Term]:
+    try:
+        payload = json.loads(raw)
+        terms = []
+        for index, candidate in enumerate(candidates):
+            value = payload[f"entity_{index}"]
+            terms.append(
+                Term.from_dict(
+                    {
+                        "source": candidate.text,
+                        "target": value["target"],
+                        "type": value["type"],
+                        "first_chapter": chapter,
+                        "remarks": value["remarks"],
+                    }
+                )
+            )
+        return terms
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError("模型沒有完整回傳所有 spaCy 候選") from exc
 
 
 @dataclass
@@ -79,17 +102,71 @@ class TranslationPipeline:
             f"- {term.source} -> {term.target}" for term in existing
         ) or "（無）"
         candidate_text = "\n".join(
-            f"- {item.text} | 建議類型：{item.suggested_type} | 來源：{item.source}"
-            for item in candidates
+            f"- entity_{index}: {item.text} | 建議類型：{item.suggested_type}"
+            for index, item in enumerate(candidates)
         )
         prompt = (
             f"章節：{chapter or '未指定'}\n\n候選實體：\n{candidate_text}\n\n"
             f"既有術語：\n{known}\n\n語境原文：\n{source}"
         )
         raw = self.client.generate(
-            self.model, SCAN_SYSTEM, prompt, format_schema=TERM_SCHEMA
+            self.model,
+            SCAN_SYSTEM,
+            prompt,
+            format_schema=build_term_schema(len(candidates)),
         )
-        return parse_proposals(raw)
+        terms = parse_classified_terms(raw, candidates, chapter or "未指定")
+        return self._repair_untranslated_targets(terms, source)
+
+    def _repair_untranslated_targets(
+        self, terms: list[Term], source: str
+    ) -> list[Term]:
+        missing = [
+            (index, term)
+            for index, term in enumerate(terms)
+            if not contains_han(term.target)
+        ]
+        if not missing:
+            return terms
+        properties = {
+            f"target_{index}": {"type": "string"}
+            for index, _ in missing
+        }
+        schema = {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
+        names = "\n".join(
+            f"- target_{index}: {term.source}" for index, term in missing
+        )
+        prompt = (
+            "請將下列英語專名音譯或意譯為自然的臺灣繁體中文。"
+            "每個值必須包含中文字，不可照抄英文：\n"
+            f"{names}\n\n語境：\n{source}"
+        )
+        raw = self.client.generate(
+            self.model,
+            "你是英語小說專名的繁體中文譯名編輯。",
+            prompt,
+            format_schema=schema,
+        )
+        try:
+            repaired = json.loads(raw)
+            result = list(terms)
+            for index, term in missing:
+                target = repaired[f"target_{index}"]
+                result[index] = Term(
+                    term.source,
+                    target,
+                    term.type,
+                    term.first_chapter,
+                    term.remarks,
+                )
+            return result
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError("模型未能補齊繁中術語譯名") from exc
 
     def translate(self, source: str, glossary: str) -> str:
         if not source.strip():
@@ -146,6 +223,10 @@ def parse_translation(raw: str) -> str:
     if not isinstance(translation, str) or not translation.strip():
         raise ValueError("模型回傳了空白譯文")
     return translation.strip()
+
+
+def contains_han(value: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", value))
 
 
 def glossary_violations(source: str, translation: str, glossary: str) -> list[str]:

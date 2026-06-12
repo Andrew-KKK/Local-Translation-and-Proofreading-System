@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import tempfile
+import time
 
 import gradio as gr
 
@@ -50,12 +51,17 @@ def download_test_text(url: str):
 
 
 def scan_terms(source, glossary, chapter, model, url, chunk_chars):
+    started = time.perf_counter()
     try:
-        terms = pipeline(model, url, chunk_chars).scan(source, glossary, chapter)
+        flow = pipeline(model, url, chunk_chars)
+        terms = flow.scan(source, glossary, chapter)
         rows = [
             [t.source, t.target, t.type, t.first_chapter, t.remarks] for t in terms
         ]
-        return rows, f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。"
+        timing = operation_timing(flow, started)
+        return rows, (
+            f"找到 {len(rows)} 筆候選，請刪除不採用的列後批准。  \n{timing}"
+        )
     except Exception as exc:
         return [], f"掃描失敗：{exc}"
 
@@ -75,6 +81,7 @@ def approve_terms(rows, glossary):
 
 
 def translate(source, glossary, model, url, chunk_chars):
+    started = time.perf_counter()
     try:
         flow = pipeline(model, url, chunk_chars)
         result = flow.translate(source, glossary)
@@ -82,12 +89,14 @@ def translate(source, glossary, model, url, chunk_chars):
         message = "翻譯初稿完成，並已自動檢查指定譯名。"
         if violations:
             message += " 自動修正後仍有違規：" + "、".join(violations)
+        message += f"  \n{operation_timing(flow, started)}"
         return result, message
     except Exception as exc:
         return "", f"翻譯失敗：{exc}"
 
 
 def review(source, draft, glossary, model, url, chunk_chars):
+    started = time.perf_counter()
     try:
         flow = pipeline(model, url, chunk_chars)
         result = flow.review(source, draft, glossary)
@@ -95,6 +104,7 @@ def review(source, draft, glossary, model, url, chunk_chars):
         message = "品質審查完成，並已自動修正偵測到的譯名違規。"
         if violations:
             message += " 仍有譯名違規：" + "、".join(violations)
+        message += f"  \n{operation_timing(flow, started)}"
         return result, message
     except Exception as exc:
         return draft, f"品質審查失敗：{exc}"
@@ -110,6 +120,14 @@ def export_files(translation: str, glossary: str):
     output.write_text(translation, encoding="utf-8")
     terms.write_text(glossary, encoding="utf-8")
     return str(output), str(terms)
+
+
+def operation_timing(flow: TranslationPipeline, started: float) -> str:
+    wall_time = time.perf_counter() - started
+    model_time = flow.client.metrics_summary()
+    return f"總等待時間 {wall_time:.1f} 秒" + (
+        f"；{model_time}" if model_time else ""
+    )
 
 
 def build_app() -> gr.Blocks:

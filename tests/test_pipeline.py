@@ -20,7 +20,13 @@ class StubClient:
 
 def test_scan_translate_and_review_flow():
     proposal = json.dumps(
-        [{"source": "Iris", "target": "艾莉絲", "type": "人物"}],
+        {
+            "entity_0": {
+                "target": "艾莉絲",
+                "type": "人物",
+                "remarks": "",
+            }
+        },
         ensure_ascii=False,
     )
     translated = json.dumps({"translation": "艾莉絲抵達了。"}, ensure_ascii=False)
@@ -33,7 +39,11 @@ def test_scan_translate_and_review_flow():
 
 
 def test_scan_prompt_contains_hybrid_ner_candidates():
-    client = StubClient(["[]"])
+    proposal = {
+        f"entity_{index}": {"target": "測試", "type": "人物", "remarks": ""}
+        for index in range(4)
+    }
+    client = StubClient([json.dumps(proposal, ensure_ascii=False)])
     flow = TranslationPipeline(client)
     flow.scan(
         "Dorothy lived in Kansas with Uncle Henry and Aunt Em.",
@@ -45,6 +55,46 @@ def test_scan_prompt_contains_hybrid_ner_candidates():
     assert "Kansas" in prompt
     assert "Uncle Henry" in prompt
     assert "Aunt Em" in prompt
+
+
+def test_scan_preserves_every_spacy_candidate():
+    proposal = {
+        "entity_0": {"target": "桃樂絲", "type": "人物", "remarks": ""},
+        "entity_1": {"target": "堪薩斯州", "type": "地名", "remarks": ""},
+        "entity_2": {"target": "亨利叔叔", "type": "稱謂", "remarks": ""},
+        "entity_3": {"target": "艾姆阿姨", "type": "稱謂", "remarks": ""},
+    }
+    flow = TranslationPipeline(
+        StubClient([json.dumps(proposal, ensure_ascii=False)])
+    )
+    terms = flow.scan(
+        "Dorothy lived in Kansas with Uncle Henry and Aunt Em.",
+        DEFAULT_GLOSSARY,
+        "Chapter 1",
+    )
+    assert [term.source for term in terms] == [
+        "Dorothy",
+        "Kansas",
+        "Uncle Henry",
+        "Aunt Em",
+    ]
+
+
+def test_scan_repairs_targets_that_are_still_english():
+    classified = {
+        "entity_0": {"target": "Dorothy", "type": "人物", "remarks": ""},
+    }
+    repaired = {"target_0": "桃樂絲"}
+    flow = TranslationPipeline(
+        StubClient(
+            [
+                json.dumps(classified, ensure_ascii=False),
+                json.dumps(repaired, ensure_ascii=False),
+            ]
+        )
+    )
+    terms = flow.scan("Dorothy arrived.", DEFAULT_GLOSSARY, "Chapter 1")
+    assert terms[0].target == "桃樂絲"
 
 
 def test_long_text_is_split_without_loss():

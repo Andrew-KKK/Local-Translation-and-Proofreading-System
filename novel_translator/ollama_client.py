@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import requests
 
 
@@ -10,6 +10,7 @@ class OllamaError(RuntimeError):
 class OllamaClient:
     base_url: str = "http://localhost:11434"
     timeout: int = 600
+    metrics: list[dict] = field(default_factory=list)
 
     def _session(self) -> requests.Session:
         session = requests.Session()
@@ -52,7 +53,21 @@ class OllamaClient:
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            return response.json()["message"]["content"].strip()
+            data = response.json()
+            self.metrics.append(
+                {
+                    key: data.get(key, 0)
+                    for key in (
+                        "total_duration",
+                        "load_duration",
+                        "prompt_eval_count",
+                        "prompt_eval_duration",
+                        "eval_count",
+                        "eval_duration",
+                    )
+                }
+            )
+            return data["message"]["content"].strip()
         except requests.ConnectionError as exc:
             raise OllamaError("無法連接 Ollama，請先啟動 Ollama 服務。") from exc
         except requests.Timeout as exc:
@@ -62,3 +77,19 @@ class OllamaClient:
             raise OllamaError(f"Ollama 請求失敗：{detail}") from exc
         except (KeyError, ValueError) as exc:
             raise OllamaError("Ollama 回傳了無法解析的資料。") from exc
+
+    def metrics_summary(self) -> str:
+        if not self.metrics:
+            return ""
+        total_ns = sum(item["total_duration"] for item in self.metrics)
+        load_ns = sum(item["load_duration"] for item in self.metrics)
+        prompt_tokens = sum(item["prompt_eval_count"] for item in self.metrics)
+        output_tokens = sum(item["eval_count"] for item in self.metrics)
+        eval_ns = sum(item["eval_duration"] for item in self.metrics)
+        speed = output_tokens / (eval_ns / 1_000_000_000) if eval_ns else 0
+        return (
+            f"Ollama {total_ns / 1_000_000_000:.1f} 秒"
+            f"（載入 {load_ns / 1_000_000_000:.1f} 秒；"
+            f"輸入 {prompt_tokens} tokens；輸出 {output_tokens} tokens；"
+            f"{speed:.2f} tokens/秒）"
+        )
