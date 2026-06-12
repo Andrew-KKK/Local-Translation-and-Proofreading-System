@@ -1,4 +1,4 @@
-# 本地端小說翻譯協作系統
+# 本地端文本翻譯校正協作系統
 
 使用 Python、Gradio、Ollama 與 Llama-3-Taiwan-8B-Instruct 製作的英翻繁中
 原型。系統以人類可讀寫的 `glossary.md` 保存譯名、稱謂與角色語氣。
