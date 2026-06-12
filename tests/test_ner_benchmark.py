@@ -1,4 +1,9 @@
-from novel_translator.ner_benchmark import Entity, score
+from novel_translator.ner_benchmark import (
+    Entity,
+    ExtractionResult,
+    compare_extractions,
+    score,
+)
 
 
 def test_score_separates_detection_from_type_error():
@@ -21,3 +26,18 @@ def test_score_separates_detection_from_type_error():
     ]
     assert round(result.precision, 3) == 0.667
     assert round(result.recall, 3) == 0.667
+
+
+def test_compares_extracted_terms_without_gold_file():
+    results = [
+        ExtractionResult(
+            "a", 0.1, [Entity("Dorothy", "人物"), Entity("Kansas", "地名")]
+        ),
+        ExtractionResult(
+            "b", 0.2, [Entity("Dorothy", "人物"), Entity("Toto", "人物")]
+        ),
+    ]
+    comparison = compare_extractions(results)[0]
+    assert comparison["common"] == ["dorothy"]
+    assert comparison["left_only"] == ["kansas"]
+    assert comparison["right_only"] == ["toto"]

@@ -110,7 +110,17 @@ smoke test。
 
 ## NER 實驗
 
-準備一份 UTF-8 英文文本，以及人工標註 JSON：
+第一輪只需準備一份 UTF-8 英文文本，直接比較不同方法抽出的字詞：
+
+```powershell
+python benchmark_ner.py test-data/wizard-of-oz.txt `
+  --methods spacy spacy-propn `
+  -o test-data/ner-comparison.json
+```
+
+報告會列出各方法的完整候選、共同字詞，以及各自獨有的字詞。
+
+若之後要計算 precision、recall 與 F1，再準備人工標註 JSON：
 
 ```json
 [
@@ -123,7 +133,7 @@ smoke test。
 
 ```powershell
 python benchmark_ner.py test-data/wizard-of-oz.txt `
-  test-data/wizard-of-oz-gold.json `
+  --gold test-data/wizard-of-oz-gold.json `
   --methods spacy spacy-propn `
   -o test-data/ner-report.json
 ```
@@ -133,7 +143,6 @@ python benchmark_ner.py test-data/wizard-of-oz.txt `
 ```powershell
 python -m pip install gliner
 python benchmark_ner.py test-data/wizard-of-oz.txt `
-  test-data/wizard-of-oz-gold.json `
   --methods spacy spacy-propn gliner
 ```
 

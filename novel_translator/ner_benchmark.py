@@ -51,6 +51,13 @@ class MethodResult:
     f1: float
 
 
+@dataclass
+class ExtractionResult:
+    method: str
+    seconds: float
+    entities: list[Entity]
+
+
 def run_benchmark(
     text: str,
     gold: list[Entity],
@@ -73,6 +80,47 @@ def run_benchmark(
             score(method, time.perf_counter() - started, predicted, gold)
         )
     return results
+
+
+def run_extraction(
+    text: str,
+    methods: list[str],
+    gliner_model: str = "urchade/gliner_small-v2.1",
+    threshold: float = 0.5,
+) -> list[ExtractionResult]:
+    runners: dict[str, Callable[[], list[Entity]]] = {
+        "spacy": lambda: extract_spacy(text, include_propn=False),
+        "spacy-propn": lambda: extract_spacy(text, include_propn=True),
+        "gliner": lambda: extract_gliner(text, gliner_model, threshold),
+    }
+    results = []
+    for method in methods:
+        if method not in runners:
+            raise ValueError(f"未知方法：{method}")
+        started = time.perf_counter()
+        entities = unique_entities(runners[method]())
+        results.append(
+            ExtractionResult(method, time.perf_counter() - started, entities)
+        )
+    return results
+
+
+def compare_extractions(results: list[ExtractionResult]) -> list[dict]:
+    comparisons = []
+    for left_index, left in enumerate(results):
+        for right in results[left_index + 1 :]:
+            left_names = {name_key(item) for item in left.entities}
+            right_names = {name_key(item) for item in right.entities}
+            comparisons.append(
+                {
+                    "left": left.method,
+                    "right": right.method,
+                    "common": sorted(left_names & right_names),
+                    "left_only": sorted(left_names - right_names),
+                    "right_only": sorted(right_names - left_names),
+                }
+            )
+    return comparisons
 
 
 def extract_spacy(text: str, include_propn: bool) -> list[Entity]:
@@ -177,6 +225,25 @@ def save_report(path: str | Path, results: list[MethodResult]) -> None:
         item = asdict(result)
         item["entities"] = [asdict(entity) for entity in result.entities]
         payload.append(item)
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def save_comparison_report(
+    path: str | Path, results: list[ExtractionResult]
+) -> None:
+    payload = {
+        "methods": [
+            {
+                "method": result.method,
+                "seconds": result.seconds,
+                "entities": [asdict(entity) for entity in result.entities],
+            }
+            for result in results
+        ],
+        "comparisons": compare_extractions(results),
+    }
     Path(path).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
