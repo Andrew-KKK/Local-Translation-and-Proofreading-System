@@ -146,6 +146,10 @@ python benchmark_ner.py test-data/wizard-of-oz.txt `
   --methods spacy spacy-propn gliner
 ```
 
+GLiNER 會自動將長文切成 220 個非空白 token 的片段，並讓相鄰片段重疊
+40 個 token，避免超過模型長度限制。可用 `--gliner-chunk-size` 與
+`--gliner-chunk-overlap` 調整。
+
 主指標只比較實體名稱是否被抓到；類型判斷錯誤會另外列出。完整 JSON 報告包含
 每種方法的候選、漏抓、誤抓、類型錯誤與執行時間。
 

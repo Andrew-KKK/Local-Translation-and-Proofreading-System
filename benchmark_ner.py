@@ -25,13 +25,30 @@ def main() -> None:
         "--gliner-model", default="urchade/gliner_small-v2.1"
     )
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--gliner-chunk-size",
+        type=int,
+        default=220,
+        help="GLiNER 每段最多非空白 token 數（預設：220）",
+    )
+    parser.add_argument(
+        "--gliner-chunk-overlap",
+        type=int,
+        default=40,
+        help="GLiNER 相鄰段落重疊 token 數（預設：40）",
+    )
     parser.add_argument("-o", "--output", default="ner-report.json")
     args = parser.parse_args()
 
     text = Path(args.text).read_text(encoding="utf-8")
     if not args.gold:
         results = run_extraction(
-            text, args.methods, args.gliner_model, args.threshold
+            text,
+            args.methods,
+            args.gliner_model,
+            args.threshold,
+            args.gliner_chunk_size,
+            args.gliner_chunk_overlap,
         )
         save_comparison_report(args.output, results)
         for result in results:
@@ -51,6 +68,7 @@ def main() -> None:
     results = run_benchmark(
         text, load_gold(args.gold), args.methods,
         args.gliner_model, args.threshold,
+        args.gliner_chunk_size, args.gliner_chunk_overlap,
     )
     save_report(args.output, results)
     print("method          precision  recall  f1     seconds")

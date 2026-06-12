@@ -7,3 +7,4 @@ exports/
 .env
 models/*.gguf
 .work-temp/
+test-data/

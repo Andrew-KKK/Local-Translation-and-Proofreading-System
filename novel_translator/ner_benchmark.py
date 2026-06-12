@@ -29,6 +29,8 @@ SPACY_LABELS = {
 CHAPTER_PATTERN = re.compile(
     r"^(?:chapter|book|part)\s+(?:\d+|[ivxlcdm]+)$", re.IGNORECASE
 )
+DEFAULT_GLINER_CHUNK_SIZE = 220
+DEFAULT_GLINER_CHUNK_OVERLAP = 40
 
 
 @dataclass(frozen=True)
@@ -64,11 +66,19 @@ def run_benchmark(
     methods: list[str],
     gliner_model: str = "urchade/gliner_small-v2.1",
     threshold: float = 0.5,
+    gliner_chunk_size: int = DEFAULT_GLINER_CHUNK_SIZE,
+    gliner_chunk_overlap: int = DEFAULT_GLINER_CHUNK_OVERLAP,
 ) -> list[MethodResult]:
     runners: dict[str, Callable[[], list[Entity]]] = {
         "spacy": lambda: extract_spacy(text, include_propn=False),
         "spacy-propn": lambda: extract_spacy(text, include_propn=True),
-        "gliner": lambda: extract_gliner(text, gliner_model, threshold),
+        "gliner": lambda: extract_gliner(
+            text,
+            gliner_model,
+            threshold,
+            gliner_chunk_size,
+            gliner_chunk_overlap,
+        ),
     }
     results = []
     for method in methods:
@@ -87,11 +97,19 @@ def run_extraction(
     methods: list[str],
     gliner_model: str = "urchade/gliner_small-v2.1",
     threshold: float = 0.5,
+    gliner_chunk_size: int = DEFAULT_GLINER_CHUNK_SIZE,
+    gliner_chunk_overlap: int = DEFAULT_GLINER_CHUNK_OVERLAP,
 ) -> list[ExtractionResult]:
     runners: dict[str, Callable[[], list[Entity]]] = {
         "spacy": lambda: extract_spacy(text, include_propn=False),
         "spacy-propn": lambda: extract_spacy(text, include_propn=True),
-        "gliner": lambda: extract_gliner(text, gliner_model, threshold),
+        "gliner": lambda: extract_gliner(
+            text,
+            gliner_model,
+            threshold,
+            gliner_chunk_size,
+            gliner_chunk_overlap,
+        ),
     }
     results = []
     for method in methods:
@@ -143,7 +161,13 @@ def extract_spacy(text: str, include_propn: bool) -> list[Entity]:
     return unique_entities(entities)
 
 
-def extract_gliner(text: str, model_name: str, threshold: float) -> list[Entity]:
+def extract_gliner(
+    text: str,
+    model_name: str,
+    threshold: float,
+    chunk_size: int = DEFAULT_GLINER_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_GLINER_CHUNK_OVERLAP,
+) -> list[Entity]:
     try:
         from gliner import GLiNER
     except ImportError as exc:
@@ -151,9 +175,25 @@ def extract_gliner(text: str, model_name: str, threshold: float) -> list[Entity]
             "尚未安裝 GLiNER，請執行：python -m pip install gliner"
         ) from exc
     model = GLiNER.from_pretrained(model_name)
-    predictions = model.predict_entities(
-        text, list(LABELS), threshold=threshold
+    return predict_gliner_chunks(
+        model, text, threshold, chunk_size, chunk_overlap
     )
+
+
+def predict_gliner_chunks(
+    model,
+    text: str,
+    threshold: float,
+    chunk_size: int = DEFAULT_GLINER_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_GLINER_CHUNK_OVERLAP,
+) -> list[Entity]:
+    predictions = []
+    for chunk in split_text_chunks(text, chunk_size, chunk_overlap):
+        predictions.extend(
+            model.predict_entities(
+                chunk, list(LABELS), threshold=threshold
+            )
+        )
     return unique_entities(
         [
             Entity(clean(item["text"]), LABELS[item["label"]])
@@ -161,6 +201,30 @@ def extract_gliner(text: str, model_name: str, threshold: float) -> list[Entity]
             if item["label"] in LABELS and not is_heading(clean(item["text"]))
         ]
     )
+
+
+def split_text_chunks(
+    text: str,
+    chunk_size: int = DEFAULT_GLINER_CHUNK_SIZE,
+    overlap: int = DEFAULT_GLINER_CHUNK_OVERLAP,
+) -> list[str]:
+    if chunk_size < 1:
+        raise ValueError("GLiNER 分段長度必須大於 0")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("GLiNER 重疊長度必須介於 0 與分段長度之間")
+
+    tokens = list(re.finditer(r"\S+", text))
+    if not tokens:
+        return []
+
+    chunks = []
+    step = chunk_size - overlap
+    for start in range(0, len(tokens), step):
+        end = min(start + chunk_size, len(tokens))
+        chunks.append(text[tokens[start].start() : tokens[end - 1].end()])
+        if end == len(tokens):
+            break
+    return chunks
 
 
 def _proper_noun_spans(doc):
